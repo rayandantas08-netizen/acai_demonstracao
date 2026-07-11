@@ -297,7 +297,7 @@ export const INITIAL_PRODUCTS: Product[] = [
 export const INITIAL_STORE_SETTINGS: StoreSettings = {
   storeName: 'AÇAÍ SUPREMO OURO',
   slogan: 'O Sabor Púrpura & Dourado da Realeza Amazônica',
-  whatsappNumber: '5511998765432', // Can be customized right in Admin
+  whatsappNumber: '5599991426465', // Can be customized right in Admin
   deliveryFee: 5.00,
   freeDeliveryThreshold: 60.00,
   openingHours: 'Seg a Dom das 13h00 às 23h30',
