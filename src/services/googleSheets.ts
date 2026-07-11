@@ -1,5 +1,5 @@
 // Google Sheets Database API Integration Service for Açaí Supremo Ouro
-// Permite usar o Google Sheets como banco de dados em tempo real via Google Apps Script Webhook ou API v4.
+// Versão otimizada para PC e Celular
 
 import { Product, AddonItem, Category, StoreSettings, OrderRecord, CustomerReview } from '../types';
 
@@ -36,7 +36,7 @@ export function setGoogleSheetsApiUrl(url: string): void {
 }
 
 /**
- * Testa a conexão e carrega todos os dados do Google Sheets (Produtos, Adicionais, Categorias, Configurações e Pedidos)
+ * Testa a conexão e carrega todos os dados do Google Sheets
  */
 export async function fetchAllFromGoogleSheets(apiUrl: string = getGoogleSheetsApiUrl()): Promise<GoogleSheetsDatabase | null> {
   if (!apiUrl) {
@@ -65,7 +65,7 @@ export async function fetchAllFromGoogleSheets(apiUrl: string = getGoogleSheetsA
 }
 
 /**
- * Envia e registra um novo PEDIDO automaticamente na aba "Pedidos" do Google Sheets
+ * Envia e registra um novo PEDIDO - VERSÃO CORRIGIDA PARA CELULAR
  */
 export async function sendOrderToGoogleSheets(
   order: OrderRecord,
@@ -77,47 +77,125 @@ export async function sendOrderToGoogleSheets(
   }
 
   try {
-    // Usamos text/plain com JSON.stringify para evitar bloqueios de pre-flight CORS do Google Apps Script
+    // PREPARA OS DADOS DO PEDIDO
+    const orderData = {
+      action: 'saveOrder',
+      order: {
+        id: order.id,
+        createdAt: order.createdAt,
+        customerName: order.customer.name,
+        customerPhone: order.customer.phone,
+        deliveryMethod: order.customer.deliveryMethod,
+        address: order.customer.deliveryMethod === 'delivery' 
+          ? `${order.customer.street}, ${order.customer.number} - ${order.customer.neighborhood} (${order.customer.complement || ''})`
+          : 'Retirada no Balcão',
+        itemsSummary: order.items.map(i => `${i.quantity}x ${i.productName}${i.selectedSize ? ` (${i.selectedSize.name})` : ''}`).join(' | '),
+        itemsJson: JSON.stringify(order.items),
+        subtotal: order.subtotal,
+        deliveryFee: order.deliveryFee,
+        discount: order.discount,
+        total: order.total,
+        paymentMethod: order.customer.paymentMethod,
+        changeFor: order.customer.changeFor,
+        status: order.status
+      }
+    };
+
+    // ===== SOLUÇÃO PARA CELULAR =====
+    // Tenta com application/json primeiro (funciona em ambos)
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        mode: 'cors',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(orderData),
+      });
+
+      if (response.ok) {
+        const result = await response.json().catch(() => ({ success: true }));
+        return { success: true, message: result.message || 'Pedido salvo no Google Sheets!' };
+      }
+    } catch (jsonError) {
+      console.warn('Falha com application/json, tentando text/plain...', jsonError);
+    }
+
+    // ===== FALLBACK: text/plain (para compatibilidade) =====
     const response = await fetch(apiUrl, {
       method: 'POST',
+      mode: 'cors',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
-      body: JSON.stringify({
-        action: 'saveOrder',
-        order: {
-          id: order.id,
-          createdAt: order.createdAt,
-          customerName: order.customer.name,
-          customerPhone: order.customer.phone,
-          deliveryMethod: order.customer.deliveryMethod,
-          address: order.customer.deliveryMethod === 'delivery' 
-            ? `${order.customer.street}, ${order.customer.number} - ${order.customer.neighborhood} (${order.customer.complement || ''})`
-            : 'Retirada no Balcão',
-          itemsSummary: order.items.map(i => `${i.quantity}x ${i.productName}${i.selectedSize ? ` (${i.selectedSize.name})` : ''}`).join(' | '),
-          itemsJson: JSON.stringify(order.items),
-          subtotal: order.subtotal,
-          deliveryFee: order.deliveryFee,
-          discount: order.discount,
-          total: order.total,
-          paymentMethod: order.customer.paymentMethod,
-          changeFor: order.customer.changeFor,
-          status: order.status
-        }
-      }),
+      body: JSON.stringify(orderData),
     });
+
+    if (!response.ok) {
+      throw new Error(`Erro HTTP: ${response.status}`);
+    }
 
     const result = await response.json().catch(() => ({ success: true }));
     return { success: true, message: result.message || 'Pedido salvo no Google Sheets!' };
+
   } catch (error) {
     console.error('Erro ao enviar pedido para o Google Sheets:', error);
-    return { success: false, message: 'Erro na conexão com Google Sheets' };
+    
+    // ===== SALVAR LOCALMENTE COMO FALLBACK =====
+    try {
+      const orders = JSON.parse(localStorage.getItem('acai_orders_backup') || '[]');
+      orders.push({ 
+        ...order, 
+        synced: false, 
+        timestamp: new Date().toISOString(),
+        syncAttempts: (order as any).syncAttempts || 0 + 1
+      });
+      localStorage.setItem('acai_orders_backup', JSON.stringify(orders));
+      console.log('📱 Pedido salvo LOCALMENTE (fallback). Será sincronizado depois.');
+      return { 
+        success: false, 
+        message: 'Pedido salvo localmente. Será sincronizado quando a conexão melhorar.' 
+      };
+    } catch (e) {
+      return { success: false, message: 'Erro na conexão com Google Sheets' };
+    }
   }
 }
 
 /**
- * Sincroniza (atualiza) os Produtos editados no painel Lojista para a aba "Produtos" no Google Sheets
+ * Sincroniza pedidos pendentes (salvos localmente)
  */
+export async function syncPendingOrders(apiUrl: string = getGoogleSheetsApiUrl()): Promise<number> {
+  try {
+    const orders = JSON.parse(localStorage.getItem('acai_orders_backup') || '[]');
+    const pendingOrders = orders.filter((o: any) => !o.synced);
+    
+    if (pendingOrders.length === 0) return 0;
+    
+    let syncedCount = 0;
+    for (const order of pendingOrders) {
+      try {
+        const result = await sendOrderToGoogleSheets(order, apiUrl);
+        if (result.success) {
+          order.synced = true;
+          syncedCount++;
+        }
+      } catch (e) {
+        console.error('Erro ao sincronizar pedido pendente:', e);
+      }
+    }
+    
+    // Atualiza o localStorage
+    localStorage.setItem('acai_orders_backup', JSON.stringify(orders));
+    return syncedCount;
+  } catch (error) {
+    console.error('Erro na sincronização de pedidos pendentes:', error);
+    return 0;
+  }
+}
+
+// ===== DEMAIS FUNÇÕES MANTIDAS =====
+
 export async function syncProductsToGoogleSheets(
   products: Product[],
   apiUrl: string = getGoogleSheetsApiUrl()
@@ -125,24 +203,19 @@ export async function syncProductsToGoogleSheets(
   if (!apiUrl) return false;
 
   try {
-    await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'syncProducts',
-        products
-      })
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'syncProducts', products })
     });
-    return true;
+    return response.ok;
   } catch (error) {
     console.error('Erro ao sincronizar produtos com Google Sheets:', error);
     return false;
   }
 }
 
-/**
- * Sincroniza (atualiza) os Adicionais editados para a aba "Adicionais" no Google Sheets
- */
 export async function syncAddonsToGoogleSheets(
   addons: AddonItem[],
   apiUrl: string = getGoogleSheetsApiUrl()
@@ -150,24 +223,19 @@ export async function syncAddonsToGoogleSheets(
   if (!apiUrl) return false;
 
   try {
-    await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'syncAddons',
-        addons
-      })
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'syncAddons', addons })
     });
-    return true;
+    return response.ok;
   } catch (error) {
     console.error('Erro ao sincronizar adicionais com Google Sheets:', error);
     return false;
   }
 }
 
-/**
- * Sincroniza (atualiza) as Configurações da Loja para a aba "Configuracoes" no Google Sheets
- */
 export async function syncSettingsToGoogleSheets(
   storeSettings: StoreSettings,
   apiUrl: string = getGoogleSheetsApiUrl()
@@ -175,24 +243,19 @@ export async function syncSettingsToGoogleSheets(
   if (!apiUrl) return false;
 
   try {
-    await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'syncSettings',
-        storeSettings
-      })
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'syncSettings', storeSettings })
     });
-    return true;
+    return response.ok;
   } catch (error) {
     console.error('Erro ao sincronizar configurações com Google Sheets:', error);
     return false;
   }
 }
 
-/**
- * Sincroniza a alteração de status do Pedido (Ex: de "Novo" para "Saiu para Entrega")
- */
 export async function syncOrderStatusToGoogleSheets(
   orderId: string,
   newStatus: string,
@@ -201,16 +264,13 @@ export async function syncOrderStatusToGoogleSheets(
   if (!apiUrl) return false;
 
   try {
-    await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'updateOrderStatus',
-        orderId,
-        status: newStatus
-      })
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'updateOrderStatus', orderId, status: newStatus })
     });
-    return true;
+    return response.ok;
   } catch (error) {
     console.error('Erro ao atualizar status do pedido no Google Sheets:', error);
     return false;
