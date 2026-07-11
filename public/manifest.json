@@ -1,0 +1,23 @@
+{
+  "name": "Açaí Supremo Ouro & Púrpura",
+  "short_name": "Açaí Supremo",
+  "description": "Catálogo Digital e Pedidos via WhatsApp para Loja de Açaí Gourmet",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#2E1065",
+  "theme_color": "#4C1D95",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍧</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍧</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
